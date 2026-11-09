@@ -71,6 +71,7 @@ interface TrackerDao {
     fun observeWindow(from: Long, to: Long): Flow<List<CalendarEntry>>
     @Insert suspend fun insertInterval(interval: TimeInterval)
     @Update suspend fun updateInterval(interval: TimeInterval)
+    @Delete suspend fun deleteIntervals(intervals: List<TimeInterval>)
 }
 
 @Database(entities = [TrackerActivity::class, TimeInterval::class], version = 1, exportSchema = true)

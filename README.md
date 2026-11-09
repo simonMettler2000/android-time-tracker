@@ -82,6 +82,8 @@ The app follows the system theme. Activity colors stay yours; the surrounding in
 7. Open **Insights** and switch between **Week** and **Month** to see where your time flowed.
 8. In **Buttons**, archive keeps an activity's history. An active activity must be ended or switched before archiving.
 
+To remove an accidental press, tap its entry in **Calendar** and use the trash icon. The confirmation shows which activity will get the time. Select **Include all consecutive entries** to remove repeated presses together. Time is transferred to the entry directly before the deletion when their times touch.
+
 Each endpoint stores its UTC instant, recorded time zone, and offset. The calendar defaults to the phone's current time zone; its zone chip can pin another display zone. Repeated daylight-saving times require an explicit offset selection. The device's configured time zone must be correct; the app does not use GPS.
 
 ## Add the widget

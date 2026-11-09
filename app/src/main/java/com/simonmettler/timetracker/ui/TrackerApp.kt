@@ -124,9 +124,15 @@ fun TrackerApp(vm: TrackerViewModel = viewModel()) {
             }
         }
         editing?.let { entry ->
-            EntryEditorSheet(entry, onDismiss = { editing = null }) { start, end, shared, onError ->
-                vm.edit(entry.interval, start, end, shared, onError) { editing = null }
-            }
+            EntryEditorSheet(
+                entry = entry,
+                onDismiss = { editing = null },
+                onSave = { start, end, shared, onError ->
+                    vm.edit(entry.interval, start, end, shared, onError) { editing = null }
+                },
+                onPrepareDeletion = { onReady, onError -> vm.prepareDeletion(entry.interval, onReady, onError) },
+                onDelete = { plan, onError -> vm.delete(plan, onError) { editing = null } }
+            )
         }
     }
 }

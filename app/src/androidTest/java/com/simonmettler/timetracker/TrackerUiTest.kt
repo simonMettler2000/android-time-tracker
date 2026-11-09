@@ -21,6 +21,7 @@ import com.simonmettler.timetracker.model.Boundary
 import com.simonmettler.timetracker.model.TimeRules
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.*
 import org.junit.*
@@ -64,6 +65,44 @@ class TrackerUiTest {
         ui.onNodeWithText("Save entry").performClick()
         ui.waitUntil(10_000) { runBlocking { app.database.dao().interval("ui-entry")!!.startAtMs == changed.atMs } }
         ui.onNodeWithText("Home").assertIsDisplayed()
+    }
+
+    @Test fun calendarCanDeleteRepeatedMistakesAndCreditThePreviousActivity() {
+        val zone = ZoneId.systemDefault()
+        val start = LocalDate.now(zone).minusDays(1).atTime(9, 0).atZone(zone).toInstant()
+        val endOfMistakes = start.plusSeconds(180).toEpochMilli()
+        runBlocking {
+            val focus = app.repository.saveActivity(null, "Focus", 0xFF19776A.toInt())
+            val mistake = app.repository.saveActivity(null, "Mistake", 0xFF7254B8.toInt())
+            val later = app.repository.saveActivity(null, "Later", 0xFFB6553C.toInt())
+            listOf(focus, mistake, mistake, later).forEachIndexed { index, activity ->
+                val from = Boundary.capture(start.plusSeconds(index * 60L), zone)
+                val to = Boundary.capture(start.plusSeconds((index + 1) * 60L), zone)
+                app.database.dao().insertInterval(TimeInterval(
+                    id = "delete-$index", activityId = activity,
+                    startAtMs = from.atMs, startZoneId = from.zoneId, startOffsetSeconds = from.offsetSeconds,
+                    endAtMs = to.atMs, endZoneId = to.zoneId, endOffsetSeconds = to.offsetSeconds,
+                    activeSlot = null, createdAtMs = from.atMs, updatedAtMs = from.atMs
+                ))
+            }
+        }
+
+        ui.onNodeWithText("Calendar").performClick()
+        ui.onNodeWithContentDescription("Previous day").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Tap an entry to edit its start and end.").fetchSemanticsNodes().isNotEmpty() }
+        val row = hasText("Mistake") and hasClickAction()
+        ui.onNode(hasScrollAction()).performScrollToNode(row)
+        ui.onAllNodes(row).onFirst().performClick()
+        ui.onNodeWithContentDescription("Delete entry").performClick()
+        ui.onNodeWithText("Include all 2 consecutive entries").performClick()
+        ui.onNodeWithText("This time will be added to Focus.").assertIsDisplayed()
+        ui.onNodeWithText("Delete 2 entries").performClick()
+
+        ui.waitUntil(10_000) { runBlocking { app.database.dao().intervals().size == 2 } }
+        val remaining = runBlocking { app.database.dao().intervals() }
+        assertEquals(listOf("delete-0", "delete-3"), remaining.map { it.id })
+        assertEquals(endOfMistakes, remaining[0].endAtMs)
+        assertEquals(endOfMistakes, remaining[1].startAtMs)
     }
 
     @Test fun longDashboardCanReachLastButtonAndCaptureScreens() {

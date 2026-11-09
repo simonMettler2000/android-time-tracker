@@ -9,6 +9,15 @@ import java.util.UUID
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+data class IntervalDeletion(
+    val selectedId: String,
+    val entries: List<TimeInterval>,
+    val previous: TimeInterval?,
+    val previousTitle: String?
+)
+
+data class IntervalDeletionChoices(val single: IntervalDeletion, val consecutive: IntervalDeletion?)
+
 class TrackerRepository(
     private val database: TrackerDatabase,
     private val clock: Clock = Clock.systemUTC(),
@@ -110,6 +119,61 @@ class TrackerRepository(
             }
             updates.values.forEach { dao.updateInterval(it) }
         }
+    }
+
+    suspend fun deletionChoices(expected: TimeInterval): IntervalDeletionChoices = database.withTransaction {
+        val selected = requireNotNull(dao.interval(expected.id)) { "This entry no longer exists." }
+        require(selected == expected) { "This entry changed while you were editing. Reopen it to load the saved times." }
+        val single = deletionPlan(selected, consecutive = false)
+        val run = deletionPlan(selected, consecutive = true)
+        IntervalDeletionChoices(single, run.takeIf { it.entries.size > 1 })
+    }
+
+    suspend fun deleteInterval(plan: IntervalDeletion) = writes.withLock {
+        database.withTransaction {
+            val selected = requireNotNull(dao.interval(plan.selectedId)) { "This entry no longer exists." }
+            val current = deletionPlan(selected, consecutive = plan.entries.size > 1)
+            require(current == plan) { "The timeline changed. Review the deletion again." }
+
+            // Remove the selected rows first so a deleted active entry can give up its unique slot.
+            dao.deleteIntervals(current.entries)
+            val last = current.entries.last()
+            current.previous?.let { previous ->
+                dao.updateInterval(previous.copy(
+                    endAtMs = last.endAtMs,
+                    endZoneId = last.endZoneId,
+                    endOffsetSeconds = last.endOffsetSeconds,
+                    activeSlot = last.activeSlot,
+                    updatedAtMs = clock.millis()
+                ))
+            }
+        }
+    }
+
+    private suspend fun deletionPlan(selected: TimeInterval, consecutive: Boolean): IntervalDeletion {
+        val entries = ArrayDeque<TimeInterval>()
+        entries.add(selected)
+        if (consecutive) {
+            while (true) {
+                val first = entries.first()
+                val previous = dao.endingAt(first.startAtMs, first.id).singleOrNull() ?: break
+                if (previous.activityId != selected.activityId) break
+                entries.addFirst(previous)
+            }
+            while (true) {
+                val last = entries.last()
+                val end = last.endAtMs ?: break
+                val next = dao.startingAt(end, last.id).singleOrNull() ?: break
+                if (next.activityId != selected.activityId) break
+                entries.addLast(next)
+            }
+        }
+        // Only transfer contiguous time. An archived activity can gain history, but cannot resume tracking.
+        val first = entries.first()
+        val previous = dao.endingAt(first.startAtMs, first.id).singleOrNull()
+        val activity = previous?.let { dao.activity(it.activityId) }
+        val recipient = previous?.takeIf { activity != null && (!activity.isArchived || entries.last().endAtMs != null) }
+        return IntervalDeletion(selected.id, entries.toList(), recipient, activity?.title.takeIf { recipient != null })
     }
 
     private fun TimeInterval.closedAt(boundary: Boundary, updated: Long) = copy(

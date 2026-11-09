@@ -3,21 +3,26 @@ package com.simonmettler.timetracker.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.IntervalDeletion
+import com.simonmettler.timetracker.data.IntervalDeletionChoices
 import com.simonmettler.timetracker.model.Boundary
 import com.simonmettler.timetracker.model.TimeRules
 import java.time.Instant
@@ -30,7 +35,13 @@ private val chipDate = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EntryEditorSheet(entry: CalendarEntry, onDismiss: () -> Unit, onSave: (Boundary, Boundary?, Boolean, (String) -> Unit) -> Unit) {
+fun EntryEditorSheet(
+    entry: CalendarEntry,
+    onDismiss: () -> Unit,
+    onSave: (Boundary, Boundary?, Boolean, (String) -> Unit) -> Unit,
+    onPrepareDeletion: ((IntervalDeletionChoices) -> Unit, (String) -> Unit) -> Unit,
+    onDelete: (IntervalDeletion, (String) -> Unit) -> Unit
+) {
     val item = entry.interval
     val originalStart = Boundary(item.startAtMs, item.startZoneId, item.startOffsetSeconds)
     val originalEnd = item.endAtMs?.let { Boundary(it, item.endZoneId!!, item.endOffsetSeconds!!) }
@@ -44,6 +55,8 @@ fun EntryEditorSheet(entry: CalendarEntry, onDismiss: () -> Unit, onSave: (Bound
     var keepOpen by remember { mutableStateOf(originalEnd == null) }
     var shared by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var deletion by remember { mutableStateOf<IntervalDeletionChoices?>(null) }
+    var busy by remember { mutableStateOf(false) }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun save() {
@@ -58,7 +71,7 @@ fun EntryEditorSheet(entry: CalendarEntry, onDismiss: () -> Unit, onSave: (Bound
         } catch (problem: IllegalArgumentException) { error = problem.message }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         // Actions stay pinned below the scrolling fields so Save is always reachable.
         Column(Modifier.fillMaxWidth().imePadding()) {
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 8.dp),
@@ -68,27 +81,100 @@ fun EntryEditorSheet(entry: CalendarEntry, onDismiss: () -> Unit, onSave: (Bound
                     Text(entry.title.first().uppercase(), style = MaterialTheme.typography.titleMedium, color = contrast(entry.colorArgb))
                 }
                 Spacer(Modifier.width(14.dp))
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("Edit ${entry.title}", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("Each endpoint keeps its own time zone, to the millisecond.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        error = null
+                        onPrepareDeletion(
+                            { choices ->
+                                deletion = choices
+                                busy = false
+                            },
+                            { message ->
+                                error = message
+                                busy = false
+                            }
+                        )
+                    }
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete entry", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            error?.let {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
+                    Text(it, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             EndpointEditor("Start", startText, startZone, startOffset, { startText = it; startOffset = "" }, { startZone = it; startOffset = "" }, { startOffset = it })
             if (originalEnd == null) ToggleRow("Keep tracking (no end)", "Leave the entry running.", keepOpen) { keepOpen = it }
             if (!keepOpen) EndpointEditor("End", endText, endZone, endOffset, { endText = it; endOffset = "" }, { endZone = it; endOffset = "" }, { endOffset = it })
             ToggleRow("Move shared boundary", "Also adjusts directly adjacent entries. Overlaps are rejected.", shared) { shared = it }
-            error?.let {
-                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
-                    Text(it, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(Modifier.padding(horizontal = 24.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium) { Text("Cancel") }
-            Button(onClick = ::save, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium) { Text("Save entry") }
+            OutlinedButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium) { Text("Cancel") }
+            Button(onClick = ::save, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium) { Text("Save entry") }
         }
         }
+    }
+
+    deletion?.let { choices ->
+        var includeConsecutive by remember(choices) { mutableStateOf(false) }
+        val plan = if (includeConsecutive) choices.consecutive ?: choices.single else choices.single
+        val endsTracking = plan.entries.last().endAtMs == null
+        val recipient = plan.previousTitle
+        val detail = when {
+            recipient != null && endsTracking -> "This time will be added to $recipient, and $recipient will resume tracking."
+            recipient != null -> "This time will be added to $recipient."
+            endsTracking -> "This time will become untracked and tracking will stop."
+            else -> "This time will become untracked."
+        }
+        AlertDialog(
+            onDismissRequest = { if (!busy) deletion = null },
+            title = { Text("Delete ${entry.title}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(detail)
+                    choices.consecutive?.let { run ->
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                                value = includeConsecutive,
+                                enabled = !busy,
+                                role = Role.Checkbox,
+                                onValueChange = { includeConsecutive = it }
+                            ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(checked = includeConsecutive, onCheckedChange = null, enabled = !busy)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Include all ${run.entries.size} consecutive entries")
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { deletion = null }, enabled = !busy) { Text("Cancel") } },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    onClick = {
+                        busy = true
+                        onDelete(plan) { message ->
+                            deletion = null
+                            busy = false
+                            error = message
+                        }
+                    }
+                ) {
+                    Text(if (plan.entries.size == 1) "Delete entry" else "Delete ${plan.entries.size} entries")
+                }
+            }
+        )
     }
 }
 

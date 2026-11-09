@@ -6,6 +6,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.simonmettler.timetracker.TrackerApplication
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.IntervalDeletion
+import com.simonmettler.timetracker.data.IntervalDeletionChoices
 import com.simonmettler.timetracker.data.TimeInterval
 import com.simonmettler.timetracker.model.Boundary
 import com.simonmettler.timetracker.model.Insights
@@ -73,6 +75,23 @@ class TrackerViewModel(application: Application, private val savedState: SavedSt
     fun move(id: String, direction: Int) = perform { repository.move(id, direction); "Button order updated" }
     fun edit(old: TimeInterval, start: Boundary, end: Boundary?, shared: Boolean, onError: (String) -> Unit, done: () -> Unit) = perform(done, onError) {
         repository.editInterval(old.id, old, start, end, shared); "Calendar entry saved"
+    }
+
+    fun prepareDeletion(old: TimeInterval, onReady: (IntervalDeletionChoices) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onReady(repository.deletionChoices(old))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                onError(error.message ?: "Could not prepare this deletion.")
+            }
+        }
+    }
+
+    fun delete(plan: IntervalDeletion, onError: (String) -> Unit, done: () -> Unit) = perform(done, onError) {
+        repository.deleteInterval(plan)
+        if (plan.entries.size == 1) "Calendar entry deleted" else "${plan.entries.size} calendar entries deleted"
     }
 
     private fun perform(done: () -> Unit = {}, onError: ((String) -> Unit)? = null, block: suspend () -> String) {

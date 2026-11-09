@@ -110,6 +110,94 @@ class RepositoryTest {
         repository.editInterval(before.id, before, boundary(before.startAtMs), boundary(clock.millis()), false)
         assertNull(db.dao().active())
     }
+
+    @Test fun deletingConsecutiveMistakesCreditsTheirTimeToThePreviousEntry() = runBlocking {
+        val later = repository.saveActivity(null, "Later", 0xFF19776A.toInt())
+        for (activity in listOf(work, travel, travel, work, later)) {
+            if (activity == travel) zone = ZoneId.of("Asia/Tokyo")
+            repository.startActivity(activity)
+            clock.time = clock.time.plusSeconds(60)
+        }
+        val original = db.dao().intervals()
+        val choices = repository.deletionChoices(original[2])
+        assertEquals(original[1], choices.single.previous)
+        val run = requireNotNull(choices.consecutive)
+        assertEquals(original.subList(1, 3), run.entries)
+        assertEquals("Work", run.previousTitle)
+
+        repository.deleteInterval(run)
+
+        val remaining = db.dao().intervals()
+        assertEquals(listOf(original[0].id, original[3].id, original[4].id), remaining.map { it.id })
+        assertEquals(original[3].startAtMs, remaining[0].endAtMs)
+        assertEquals(original[2].endZoneId, remaining[0].endZoneId)
+        assertEquals(original[2].endOffsetSeconds, remaining[0].endOffsetSeconds)
+        assertEquals(original[3], remaining[1])
+        assertEquals(original[4], db.dao().active())
+    }
+
+    @Test fun deletingOneRepeatedPressLeavesTheOtherPressInPlace() = runBlocking {
+        for (activity in listOf(work, travel, travel)) {
+            repository.startActivity(activity)
+            clock.time = clock.time.plusSeconds(60)
+        }
+        val original = db.dao().intervals()
+
+        repository.deleteInterval(repository.deletionChoices(original[1]).single)
+
+        val remaining = db.dao().intervals()
+        assertEquals(listOf(original[0].id, original[2].id), remaining.map { it.id })
+        assertEquals(original[2].startAtMs, remaining.first().endAtMs)
+        assertEquals(original[2], db.dao().active())
+    }
+
+    @Test fun deletingAnActiveMistakeResumesThePreviousActivity() = runBlocking {
+        repository.startActivity(work)
+        clock.time = clock.time.plusSeconds(60)
+        repository.startActivity(travel)
+        val original = db.dao().intervals()
+
+        repository.deleteInterval(repository.deletionChoices(original.last()).single)
+
+        val resumed = db.dao().active()!!
+        assertEquals(original.first().id, resumed.id)
+        assertEquals(original.first().startAtMs, resumed.startAtMs)
+        assertNull(resumed.endAtMs)
+        assertEquals(1, db.dao().intervals().size)
+    }
+
+    @Test fun deletionDoesNotFillAnExistingGap() = runBlocking {
+        repository.startActivity(work)
+        clock.time = clock.time.plusSeconds(120)
+        repository.startActivity(travel)
+        val original = db.dao().intervals()
+        val prior = original.first()
+        val shortenedEnd = boundary(prior.endAtMs!! - 60_000)
+        repository.editInterval(prior.id, prior, boundary(prior.startAtMs), shortenedEnd, false)
+
+        val plan = repository.deletionChoices(original.last()).single
+        assertNull(plan.previous)
+        repository.deleteInterval(plan)
+
+        assertEquals(shortenedEnd.atMs, db.dao().intervals().single().endAtMs)
+        assertNull(db.dao().active())
+    }
+
+    @Test fun deletionCannotApplyAStaleConfirmationAfterAnotherPress() = runBlocking {
+        for (activity in listOf(work, travel, travel)) {
+            repository.startActivity(activity)
+            clock.time = clock.time.plusSeconds(60)
+        }
+        val firstTravel = db.dao().intervals()[1]
+        val plan = requireNotNull(repository.deletionChoices(firstTravel).consecutive)
+        repository.startActivity(work)
+        val afterSwitch = db.dao().intervals()
+
+        failure { repository.deleteInterval(plan) }
+
+        assertEquals(afterSwitch, db.dao().intervals())
+    }
+
     @Test fun archivingPreservesHistoryAndRejectsActiveActivity() = runBlocking {
         repository.startActivity(work)
         failure { repository.setArchived(work, true) }
