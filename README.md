@@ -16,6 +16,16 @@ week and month insights, and a home-screen widget. No account, no server, no Int
 
 </div>
 
+## Install on Android
+
+Time Tracker requires Android 8.0 or newer.
+
+1. On your phone, open the [latest GitHub release](https://github.com/simonMettler2000/android-time-tracker/releases/latest).
+2. Under **Assets**, download the `.apk` file and open it from **Downloads**.
+3. If Android asks for permission, tap **Settings** and turn on **Allow from this source** for the browser or file manager that opened the APK. Return to the installer and tap **Install** or **Update**. [Android installation help](https://support.google.com/pixelphone/answer/7391672#zippy=%2Cdownload-apps-from-other-sources)
+
+The APK uses the same development signing key as the earlier download. If you already use that build, install the APK over it to keep your local tracking history. Uninstalling the app or clearing its storage deletes that history.
+
 ## Track: one tap, no timers to babysit
 
 <img src="docs/screenshots/home.png" alt="Home screen with live timer and activity tiles" width="270" align="right">
@@ -112,7 +122,7 @@ chmod +x gradlew
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
 
-The installable development APK is `app/build/outputs/apk/debug/app-debug.apk`. It uses the development signing key. Release builds are deliberately unsigned; configure your own private signing configuration for distribution. Do not commit signing credentials.
+The local development APK is `app/build/outputs/apk/debug/app-debug.apk`. The GitHub release asset uses the same development signing key. The Gradle `assembleRelease` task produces an unsigned APK by default. Keep signing credentials private.
 
 Use a disposable emulator or a dedicated test device for instrumentation. Gradle's test installer can uninstall the app. With that test device connected:
 
