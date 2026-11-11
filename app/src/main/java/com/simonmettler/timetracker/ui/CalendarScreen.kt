@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -37,8 +38,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.simonmettler.timetracker.data.CalendarItem
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.calendarTimeline
 import com.simonmettler.timetracker.model.TimeRules
+import java.math.BigDecimal
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -51,20 +55,27 @@ import java.util.Locale
 
 private val weekdayLabel = DateTimeFormatter.ofPattern("EEEE")
 private val fullDate = DateTimeFormatter.ofPattern("d MMMM yyyy")
+private val preciseClock = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarScreen(day: LocalDate, zone: ZoneId, entries: List<CalendarEntry>, onDay: (LocalDate) -> Unit, onZone: (ZoneId) -> Unit, onDevice: () -> Unit, onEdit: (CalendarEntry) -> Unit) {
+internal fun CalendarScreen(
+    day: LocalDate,
+    zone: ZoneId,
+    entries: List<CalendarEntry>,
+    onDay: (LocalDate) -> Unit,
+    onZone: (ZoneId) -> Unit,
+    onDevice: () -> Unit,
+    onEdit: (CalendarEntry) -> Unit,
+    onFillGap: (CalendarItem.Gap) -> Unit
+) {
     val now = rememberNow(60_000)
     var zoneDialog by remember { mutableStateOf(false) }
     var dateDialog by remember { mutableStateOf(false) }
     val today = LocalDate.now(zone)
     val (from, to) = TimeRules.dayWindow(day, zone)
-    val visible = entries.filter {
-        val item = it.interval
-        TimeRules.clippedDuration(item.startAtMs, item.endAtMs, from, to, now) > 0 ||
-            (item.endAtMs == null && item.startAtMs < to && now >= item.startAtMs && now >= from)
-    }
+    val timeline = calendarTimeline(entries, from, to, now)
+    val visible = timeline.mapNotNull { (it as? CalendarItem.Entry)?.entry }
     val parts = totals(visible, from, to, now)
     val total = parts.sumOf { it.ms }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -89,7 +100,7 @@ fun CalendarScreen(day: LocalDate, zone: ZoneId, entries: List<CalendarEntry>, o
             }
         }
         item { SummaryCard(parts, total, visible, from, to, now) }
-        if (visible.isEmpty()) item {
+        if (timeline.isEmpty()) item {
             Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("A blank page", style = MaterialTheme.typography.titleMedium)
@@ -102,7 +113,17 @@ fun CalendarScreen(day: LocalDate, zone: ZoneId, entries: List<CalendarEntry>, o
             Text("Tap an entry to edit its start and end.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
         }
-        items(visible, key = { it.interval.id }) { entry -> TimelineRow(entry, from, to, now, zone) { onEdit(entry) } }
+        items(timeline, key = { item ->
+            when (item) {
+                is CalendarItem.Entry -> item.entry.interval.id
+                is CalendarItem.Gap -> "gap-${item.startAtMs}-${item.endAtMs}"
+            }
+        }) { item ->
+            when (item) {
+                is CalendarItem.Entry -> TimelineRow(item.entry, from, to, now, zone) { onEdit(item.entry) }
+                is CalendarItem.Gap -> GapRow(item, zone) { onFillGap(item) }
+            }
+        }
     }
     if (zoneDialog) ZoneDialog(zone, onDismiss = { zoneDialog = false }, onSave = { onZone(it); zoneDialog = false }, onDevice = { onDevice(); zoneDialog = false })
     if (dateDialog) DatePickDialog(day, onDismiss = { dateDialog = false }) { onDay(it); dateDialog = false }
@@ -240,6 +261,30 @@ private fun TimelineRow(entry: CalendarEntry, from: Long, to: Long, now: Long, z
                     if ((item.endAtMs ?: now) > to) Text("Continues into the next day", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GapRow(gap: CalendarItem.Gap, zone: ZoneId, onClick: () -> Unit) {
+    val elapsed = gap.endAtMs - gap.startAtMs
+    val formatter = if (elapsed < 60_000) preciseClock else clockLabel
+    val start = Instant.ofEpochMilli(gap.startAtMs).atZone(zone).format(formatter)
+    val end = Instant.ofEpochMilli(gap.endAtMs).atZone(zone).format(formatter)
+    val length = when {
+        elapsed < 1_000 -> "$elapsed ms"
+        elapsed < 60_000 -> "${BigDecimal.valueOf(elapsed, 3).stripTrailingZeros().toPlainString()} s"
+        else -> duration(elapsed)
+    }
+    OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Untracked time", style = MaterialTheme.typography.titleMedium)
+                Text("$start – $end · $length", style = MaterialTheme.typography.bodyMedium.merge(Numeric),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Add activity", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
+            Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
     }
 }

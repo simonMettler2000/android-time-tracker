@@ -194,7 +194,7 @@ private fun ToggleRow(title: String, detail: String, checked: Boolean, onChange:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EndpointEditor(label: String, text: String, zone: String, offset: String, onText: (String) -> Unit, onZone: (String) -> Unit, onOffset: (String) -> Unit) {
+internal fun EndpointEditor(label: String, text: String, zone: String, offset: String, onText: (String) -> Unit, onZone: (String) -> Unit, onOffset: (String) -> Unit) {
     var pickDate by remember { mutableStateOf(false) }
     var pickTime by remember { mutableStateOf(false) }
     val parsed = runCatching { LocalDateTime.parse(text, TimeRules.editorFormat) }.getOrNull()

@@ -42,6 +42,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.CalendarItem
+import java.time.ZoneId
 
 private enum class Screen(val label: String, val selected: ImageVector, val idle: ImageVector) {
     Home("Home", Icons.Filled.Home, Icons.Outlined.Home),
@@ -61,6 +63,7 @@ fun TrackerApp(vm: TrackerViewModel = viewModel()) {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
     var editActivityId by rememberSaveable { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<CalendarEntry?>(null) }
+    var fillingGap by remember { mutableStateOf<Pair<CalendarItem.Gap, ZoneId>?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -105,7 +108,9 @@ fun TrackerApp(vm: TrackerViewModel = viewModel()) {
                         )
                         Screen.Calendar -> {
                             val entries by vm.calendar.collectAsStateWithLifecycle()
-                            CalendarScreen(day, zone, entries, vm::setDay, vm::setZone, vm::followDevice) { editing = it }
+                            CalendarScreen(day, zone, entries, vm::setDay, vm::setZone, vm::followDevice,
+                                onEdit = { editing = it },
+                                onFillGap = { fillingGap = it to zone })
                         }
                         Screen.Insights -> {
                             val period by vm.period.collectAsStateWithLifecycle()
@@ -133,6 +138,11 @@ fun TrackerApp(vm: TrackerViewModel = viewModel()) {
                 onPrepareDeletion = { onReady, onError -> vm.prepareDeletion(entry.interval, onReady, onError) },
                 onDelete = { plan, onError -> vm.delete(plan, onError) { editing = null } }
             )
+        }
+        fillingGap?.let { (gap, gapZone) ->
+            GapEditorSheet(gap, gapZone, activities.filterNot { it.isArchived }, onDismiss = { fillingGap = null }) { id, start, end, onError ->
+                vm.fillGap(id, gap, start, end, onError) { fillingGap = null }
+            }
         }
     }
 }

@@ -69,6 +69,28 @@ interface TrackerDao {
     suspend fun startingAt(at: Long, id: String): List<TimeInterval>
     @Query("SELECT time_interval.*, activity.title AS activity_title, activity.color_argb AS activity_color FROM time_interval JOIN activity ON activity.id = activity_id WHERE start_at_ms < :to AND (end_at_ms IS NULL OR end_at_ms > :from) ORDER BY start_at_ms, time_interval.id")
     fun observeWindow(from: Long, to: Long): Flow<List<CalendarEntry>>
+    @Query("""
+        SELECT time_interval.*, activity.title AS activity_title, activity.color_argb AS activity_color
+        FROM time_interval JOIN activity ON activity.id = activity_id
+        WHERE time_interval.id IN (
+            SELECT id FROM time_interval
+            WHERE start_at_ms < :to AND (end_at_ms IS NULL OR end_at_ms > :from)
+            UNION ALL
+            SELECT id FROM (
+                SELECT id FROM time_interval
+                WHERE start_at_ms < :from AND end_at_ms <= :from AND end_at_ms > start_at_ms
+                ORDER BY start_at_ms DESC LIMIT 1
+            )
+            UNION ALL
+            SELECT id FROM (
+                SELECT id FROM time_interval
+                WHERE start_at_ms >= :to AND (end_at_ms IS NULL OR end_at_ms > start_at_ms)
+                ORDER BY start_at_ms LIMIT 1
+            )
+        )
+        ORDER BY start_at_ms, time_interval.id
+    """)
+    fun observeCalendarWindow(from: Long, to: Long): Flow<List<CalendarEntry>>
     @Insert suspend fun insertInterval(interval: TimeInterval)
     @Update suspend fun updateInterval(interval: TimeInterval)
     @Delete suspend fun deleteIntervals(intervals: List<TimeInterval>)

@@ -11,6 +11,7 @@ import com.simonmettler.timetracker.widget.ActivityIdKey
 import com.simonmettler.timetracker.widget.StartTrackerAction
 import java.time.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -94,6 +95,34 @@ class RepositoryTest {
         assertEquals(shifted.atMs, rows.last().startAtMs)
         assertEquals(1, rows.last().activeSlot)
     }
+    @Test fun fillingPartOfAMultiDayGapKeepsTheActiveEntryAndRemainingMilliseconds() = runBlocking {
+        repository.startActivity(work)
+        val first = db.dao().active()!!
+        clock.time = clock.time.plusSeconds(60)
+        repository.editInterval(first.id, first, boundary(first.startAtMs), boundary(clock.millis()), false)
+        clock.time = clock.time.plus(Duration.ofDays(2))
+        repository.startActivity(travel)
+        val active = db.dao().active()
+        val from = LocalDate.of(2026, 11, 6).atStartOfDay(zone).toInstant().toEpochMilli()
+        val to = LocalDate.of(2026, 11, 7).atStartOfDay(zone).toInstant().toEpochMilli()
+
+        suspend fun timeline() = calendarTimeline(repository.calendarWindow(from, to).first(), from, to, clock.millis())
+
+        val gap = CalendarItem.Gap(from, to)
+        assertEquals(listOf(gap), timeline())
+        failure { repository.fillGap(work, gap, boundary(from - 1), boundary(to)) }
+        failure { repository.fillGap(work, gap, boundary(from), boundary(from)) }
+        repository.fillGap(work, gap, boundary(from + 1), boundary(to))
+        failure { repository.fillGap(travel, gap, boundary(from), boundary(to)) }
+        assertEquals(active, db.dao().active())
+        assertEquals(CalendarItem.Gap(from, from + 1), timeline().first())
+        val added = (timeline().last() as CalendarItem.Entry).entry.interval
+        assertEquals(work, added.activityId)
+        assertEquals(from + 1, added.startAtMs)
+        assertEquals(to, added.endAtMs)
+        assertNull(added.activeSlot)
+    }
+
     @Test fun staleCalendarEditorCannotOverwriteAWidgetSwitch() = runBlocking {
         repository.startActivity(work)
         val before = db.dao().active()!!

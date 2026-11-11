@@ -28,6 +28,7 @@ class TrackerRepository(
     val activities = dao.observeActivities()
     val active = dao.observeActive()
     fun window(from: Long, to: Long) = dao.observeWindow(from, to)
+    fun calendarWindow(from: Long, to: Long) = dao.observeCalendarWindow(from, to)
 
     suspend fun widgetSnapshot() = database.withTransaction { dao.visibleActivities() to dao.active()?.activityId }
 
@@ -81,6 +82,26 @@ class TrackerRepository(
                 createdAtMs = boundary.atMs, updatedAtMs = boundary.atMs
             ))
             item.title
+        }
+    }
+
+    internal suspend fun fillGap(activityId: String, gap: CalendarItem.Gap, start: Boundary, end: Boundary) = writes.withLock {
+        database.withTransaction {
+            val now = clock.millis()
+            require(start.atMs < end.atMs) { "End must be after start." }
+            require(start.atMs >= gap.startAtMs && end.atMs <= gap.endAtMs) { "Choose times within this gap." }
+            require(end.atMs <= now) { "Calendar times cannot be in the future." }
+            val activity = dao.activity(activityId)
+            require(activity != null && !activity.isArchived) { "Choose an available activity." }
+            require(dao.conflicts("", start.atMs, end.atMs).isEmpty()) {
+                "This gap changed while you were editing. Reopen it to see the available time."
+            }
+            dao.insertInterval(TimeInterval(
+                id = UUID.randomUUID().toString(), activityId = activityId,
+                startAtMs = start.atMs, startZoneId = start.zoneId, startOffsetSeconds = start.offsetSeconds,
+                endAtMs = end.atMs, endZoneId = end.zoneId, endOffsetSeconds = end.offsetSeconds,
+                activeSlot = null, createdAtMs = now, updatedAtMs = now
+            ))
         }
     }
 

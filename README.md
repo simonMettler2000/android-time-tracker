@@ -61,6 +61,8 @@ Further down, **Tracked today** shows the day so far as one bar split by activit
 
 The **Calendar** has a week strip, a 24-hour ribbon that shows *when* the time happened, a per-activity breakdown and a timeline of entries. Tap an entry to adjust its start and end with date and time pickers or exact millisecond text. Each endpoint keeps its own time zone. **Buttons** lets you create, rename, recolor, reorder and archive activities, with a live preview.
 
+If you recorded A and C but missed B, adjust A's end and C's start to leave room for B. Keep **Move shared boundary** off when separating the entries. Tap **Untracked time** in the timeline, choose B, and tap **Add entry**. The start and end are filled in for you. You can shorten the new entry to leave the rest of the gap available. Gaps appear between recorded entries, down to the millisecond.
+
 ## Light and dark
 
 <p align="center">

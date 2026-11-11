@@ -67,6 +67,60 @@ class TrackerUiTest {
         ui.onNodeWithText("Home").assertIsDisplayed()
     }
 
+    @Test fun calendarCanFillHalfSecondGapCreatedByEditingAnEntry() {
+        val zone = ZoneId.systemDefault()
+        val start = LocalDate.now(zone).minusDays(1).atTime(9, 0).atZone(zone).toInstant()
+        val gapEnd = start.plusSeconds(60)
+        val gapStart = gapEnd.minusMillis(500)
+        val missed = runBlocking {
+            val first = app.repository.saveActivity(null, "First", 0xFF19776A.toInt())
+            val missed = app.repository.saveActivity(null, "Missed activity", 0xFF7254B8.toInt())
+            val later = app.repository.saveActivity(null, "Later", 0xFFB6553C.toInt())
+            listOf(first, later).forEachIndexed { index, activity ->
+                val from = Boundary.capture(start.plusSeconds(index * 60L), zone)
+                val to = Boundary.capture(start.plusSeconds((index + 1) * 60L), zone)
+                app.database.dao().insertInterval(TimeInterval(
+                    id = "gap-$index", activityId = activity,
+                    startAtMs = from.atMs, startZoneId = from.zoneId, startOffsetSeconds = from.offsetSeconds,
+                    endAtMs = to.atMs, endZoneId = to.zoneId, endOffsetSeconds = to.offsetSeconds,
+                    activeSlot = null, createdAtMs = from.atMs, updatedAtMs = from.atMs
+                ))
+            }
+            missed
+        }
+
+        ui.onNodeWithText("Calendar").performClick()
+        ui.onNodeWithContentDescription("Previous day").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Tap an entry to edit its start and end.").fetchSemanticsNodes().isNotEmpty() }
+        val firstRow = hasText("First") and hasClickAction()
+        ui.onNode(hasScrollAction()).performScrollToNode(firstRow)
+        ui.onNode(firstRow).performClick()
+        ui.onNodeWithText("End date and time").performScrollTo()
+            .performTextReplacement(TimeRules.originalLocal(Boundary.capture(gapStart, zone)))
+        ui.onNodeWithText("Save entry").performClick()
+        // Let the save confirmation clear before tapping a row near the bottom of the list.
+        val confirmation = ui.onAllNodesWithText("Calendar entry saved")
+        ui.waitUntil(10_000) { confirmation.fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(10_000) { confirmation.fetchSemanticsNodes().isEmpty() }
+
+        val gapRow = hasText("Untracked time") and hasClickAction()
+        ui.onNode(hasScrollAction()).performScrollToNode(gapRow)
+        ui.onNode(gapRow and hasText("500 ms", substring = true)).assertIsDisplayed().performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Fill untracked time").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("Choose activity").performClick()
+        ui.onNodeWithText("Missed activity").performClick()
+        ui.onNodeWithText("Add entry").performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithText("Add entry").fetchSemanticsNodes().isEmpty() }
+
+        val addedRow = hasText("Missed activity") and hasClickAction()
+        ui.onNode(hasScrollAction()).performScrollToNode(addedRow)
+        ui.onNode(addedRow).assertIsDisplayed()
+        ui.onNode(gapRow).assertDoesNotExist()
+        val saved = runBlocking { app.database.dao().intervals() }.single { it.activityId == missed }
+        assertEquals(gapStart.toEpochMilli(), saved.startAtMs)
+        assertEquals(gapEnd.toEpochMilli(), saved.endAtMs)
+    }
+
     @Test fun calendarCanDeleteRepeatedMistakesAndCreditThePreviousActivity() {
         val zone = ZoneId.systemDefault()
         val start = LocalDate.now(zone).minusDays(1).atTime(9, 0).atZone(zone).toInstant()

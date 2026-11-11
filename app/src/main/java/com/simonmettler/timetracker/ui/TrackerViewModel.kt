@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.simonmettler.timetracker.TrackerApplication
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.CalendarItem
 import com.simonmettler.timetracker.data.IntervalDeletion
 import com.simonmettler.timetracker.data.IntervalDeletionChoices
 import com.simonmettler.timetracker.data.TimeInterval
@@ -32,7 +33,7 @@ class TrackerViewModel(application: Application, private val savedState: SavedSt
     private var followDeviceZone = true
     val calendar = combine(day, zone, ::Pair).flatMapLatest { (day, zone) ->
         val (from, to) = TimeRules.dayWindow(day, zone)
-        repository.window(from, to)
+        repository.calendarWindow(from, to)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), emptyList())
     // Home always summarizes the current day, independent of the calendar's selected day.
     private val todayState = MutableStateFlow(LocalDate.now())
@@ -75,6 +76,18 @@ class TrackerViewModel(application: Application, private val savedState: SavedSt
     fun move(id: String, direction: Int) = perform { repository.move(id, direction); "Button order updated" }
     fun edit(old: TimeInterval, start: Boundary, end: Boundary?, shared: Boolean, onError: (String) -> Unit, done: () -> Unit) = perform(done, onError) {
         repository.editInterval(old.id, old, start, end, shared); "Calendar entry saved"
+    }
+
+    internal fun fillGap(
+        activityId: String,
+        gap: CalendarItem.Gap,
+        start: Boundary,
+        end: Boundary,
+        onError: (String) -> Unit,
+        done: () -> Unit
+    ) = perform(done, onError) {
+        repository.fillGap(activityId, gap, start, end)
+        "Calendar entry added"
     }
 
     fun prepareDeletion(old: TimeInterval, onReady: (IntervalDeletionChoices) -> Unit, onError: (String) -> Unit) {
