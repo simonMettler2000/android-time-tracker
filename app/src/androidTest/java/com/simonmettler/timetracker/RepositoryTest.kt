@@ -123,6 +123,44 @@ class RepositoryTest {
         assertNull(added.activeSlot)
     }
 
+    @Test fun combiningRequiresExactAdjacencyAndPreservesTheOuterBoundariesAndActiveSlot() = runBlocking {
+        repository.startActivity(work)
+        clock.time = clock.time.plusSeconds(60)
+        repository.startActivity(work)
+        val (first, secondWhileActive) = db.dao().intervals()
+        clock.time = clock.time.plusSeconds(60)
+        repository.startActivity(work)
+        val (_, second, third) = db.dao().intervals()
+        failure { repository.combineIntervals(first, secondWhileActive) }
+
+        repository.editInterval(first.id, first, boundary(first.startAtMs), boundary(second.startAtMs - 1), false)
+        val shortened = db.dao().interval(first.id)!!
+        failure { repository.combineIntervals(shortened, second) }
+        repository.editInterval(shortened.id, shortened, boundary(first.startAtMs), boundary(second.startAtMs), false)
+
+        repository.combineIntervals(second, third)
+        val active = db.dao().active()!!
+        assertEquals(second.id, active.id)
+        assertEquals(second.startAtMs, active.startAtMs)
+        assertNull(db.dao().interval(third.id))
+
+        zone = ZoneId.of("Asia/Tokyo")
+        clock.time = clock.time.plusSeconds(60)
+        repository.startActivity(travel)
+        val (earliest, combinedSecond, otherActivity) = db.dao().intervals()
+        failure { repository.combineIntervals(combinedSecond, otherActivity) }
+        repository.combineIntervals(earliest, combinedSecond)
+
+        val (combined, remaining) = db.dao().intervals()
+        assertEquals(earliest.id, combined.id)
+        assertEquals(earliest.startAtMs, combined.startAtMs)
+        assertEquals(earliest.startZoneId, combined.startZoneId)
+        assertEquals(combinedSecond.endAtMs, combined.endAtMs)
+        assertEquals(combinedSecond.endZoneId, combined.endZoneId)
+        assertEquals(combinedSecond.endOffsetSeconds, combined.endOffsetSeconds)
+        assertEquals(otherActivity, remaining)
+    }
+
     @Test fun staleCalendarEditorCannotOverwriteAWidgetSwitch() = runBlocking {
         repository.startActivity(work)
         val before = db.dao().active()!!

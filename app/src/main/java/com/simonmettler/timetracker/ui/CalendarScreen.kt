@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.simonmettler.timetracker.data.CalendarItem
 import com.simonmettler.timetracker.data.CalendarEntry
+import com.simonmettler.timetracker.data.TimeInterval
 import com.simonmettler.timetracker.data.calendarTimeline
 import com.simonmettler.timetracker.model.TimeRules
 import java.math.BigDecimal
@@ -67,7 +68,8 @@ internal fun CalendarScreen(
     onZone: (ZoneId) -> Unit,
     onDevice: () -> Unit,
     onEdit: (CalendarEntry) -> Unit,
-    onFillGap: (CalendarItem.Gap) -> Unit
+    onFillGap: (CalendarItem.Gap) -> Unit,
+    onCombine: (TimeInterval, TimeInterval) -> Unit
 ) {
     val now = rememberNow(60_000)
     var zoneDialog by remember { mutableStateOf(false) }
@@ -120,7 +122,7 @@ internal fun CalendarScreen(
             }
         }) { item ->
             when (item) {
-                is CalendarItem.Entry -> TimelineRow(item.entry, from, to, now, zone) { onEdit(item.entry) }
+                is CalendarItem.Entry -> TimelineRow(item, from, to, now, zone, onCombine) { onEdit(item.entry) }
                 is CalendarItem.Gap -> GapRow(item, zone) { onFillGap(item) }
             }
         }
@@ -227,7 +229,16 @@ private fun DayRibbon(entries: List<CalendarEntry>, from: Long, to: Long, now: L
 }
 
 @Composable
-private fun TimelineRow(entry: CalendarEntry, from: Long, to: Long, now: Long, zone: ZoneId, onClick: () -> Unit) {
+private fun TimelineRow(
+    row: CalendarItem.Entry,
+    from: Long,
+    to: Long,
+    now: Long,
+    zone: ZoneId,
+    onCombine: (TimeInterval, TimeInterval) -> Unit,
+    onClick: () -> Unit
+) {
+    val entry = row.entry
     val item = entry.interval
     val color = Color(entry.colorArgb)
     val start = Instant.ofEpochMilli(maxOf(item.startAtMs, from)).atZone(zone).format(clockLabel)
@@ -259,7 +270,37 @@ private fun TimelineRow(entry: CalendarEntry, from: Long, to: Long, now: Long, z
                     Text("$start – $end  ·  ${duration(elapsed)}", style = MaterialTheme.typography.bodyMedium.merge(Numeric), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (item.startAtMs < from) Text("Continues from a previous day", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     if ((item.endAtMs ?: now) > to) Text("Continues into the next day", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    if (row.combinePrevious != null || row.combineNext != null) CombineButton(row, onCombine)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CombineButton(row: CalendarItem.Entry, onCombine: (TimeInterval, TimeInterval) -> Unit) {
+    val item = row.entry.interval
+    val previous = row.combinePrevious
+    val next = row.combineNext
+    var expanded by remember(previous, next) { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = {
+            when {
+                previous != null && next != null -> expanded = true
+                previous != null -> onCombine(previous, item)
+                next != null -> onCombine(item, next)
+            }
+        }) { Text("Combine") }
+        if (previous != null && next != null) {
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(text = { Text("Combine with previous") }, onClick = {
+                    expanded = false
+                    onCombine(previous, item)
+                })
+                DropdownMenuItem(text = { Text("Combine with next") }, onClick = {
+                    expanded = false
+                    onCombine(item, next)
+                })
             }
         }
     }

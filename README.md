@@ -63,6 +63,8 @@ The **Calendar** has a week strip, a 24-hour ribbon that shows *when* the time h
 
 If you recorded A and C but missed B, adjust A's end and C's start to leave room for B. Keep **Move shared boundary** off when separating the entries. Tap **Untracked time** in the timeline, choose B, and tap **Add entry**. The start and end are filled in for you. You can shorten the new entry to leave the rest of the gap available. Gaps appear between recorded entries, down to the millisecond.
 
+When two entries for the same activity touch, tap **Combine** on either entry to keep the first start and the second end. If both neighbors match, choose which one to combine with.
+
 ## Light and dark
 
 <p align="center">

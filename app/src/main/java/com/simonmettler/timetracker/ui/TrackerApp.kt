@@ -110,7 +110,8 @@ fun TrackerApp(vm: TrackerViewModel = viewModel()) {
                             val entries by vm.calendar.collectAsStateWithLifecycle()
                             CalendarScreen(day, zone, entries, vm::setDay, vm::setZone, vm::followDevice,
                                 onEdit = { editing = it },
-                                onFillGap = { fillingGap = it to zone })
+                                onFillGap = { fillingGap = it to zone },
+                                onCombine = vm::combine)
                         }
                         Screen.Insights -> {
                             val period by vm.period.collectAsStateWithLifecycle()

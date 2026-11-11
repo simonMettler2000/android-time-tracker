@@ -105,6 +105,24 @@ class TrackerRepository(
         }
     }
 
+    internal suspend fun combineIntervals(first: TimeInterval, second: TimeInterval) = writes.withLock {
+        database.withTransaction {
+            require(first.canCombineWith(second)) { "Choose two touching entries for the same activity." }
+            require(dao.interval(first.id) == first && dao.interval(second.id) == second) {
+                "These entries changed. Review the calendar and try again."
+            }
+            // Release the unique active slot before giving it to the combined entry.
+            dao.deleteIntervals(listOf(second))
+            dao.updateInterval(first.copy(
+                endAtMs = second.endAtMs,
+                endZoneId = second.endZoneId,
+                endOffsetSeconds = second.endOffsetSeconds,
+                activeSlot = second.activeSlot,
+                updatedAtMs = clock.millis()
+            ))
+        }
+    }
+
     suspend fun editInterval(id: String, expected: TimeInterval, start: Boundary, end: Boundary?, moveShared: Boolean) = writes.withLock {
         database.withTransaction {
             val old = requireNotNull(dao.interval(id)) { "This entry no longer exists." }

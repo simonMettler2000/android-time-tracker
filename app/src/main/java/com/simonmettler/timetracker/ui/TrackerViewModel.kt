@@ -90,6 +90,11 @@ class TrackerViewModel(application: Application, private val savedState: SavedSt
         "Calendar entry added"
     }
 
+    internal fun combine(first: TimeInterval, second: TimeInterval) = perform {
+        repository.combineIntervals(first, second)
+        "Calendar entries combined"
+    }
+
     fun prepareDeletion(old: TimeInterval, onReady: (IntervalDeletionChoices) -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             try {

@@ -67,14 +67,13 @@ class TrackerUiTest {
         ui.onNodeWithText("Home").assertIsDisplayed()
     }
 
-    @Test fun calendarCanFillHalfSecondGapCreatedByEditingAnEntry() {
+    @Test fun calendarCanFillAHalfSecondGapAndCombineTheMatchingEntries() {
         val zone = ZoneId.systemDefault()
         val start = LocalDate.now(zone).minusDays(1).atTime(9, 0).atZone(zone).toInstant()
         val gapEnd = start.plusSeconds(60)
         val gapStart = gapEnd.minusMillis(500)
-        val missed = runBlocking {
+        runBlocking {
             val first = app.repository.saveActivity(null, "First", 0xFF19776A.toInt())
-            val missed = app.repository.saveActivity(null, "Missed activity", 0xFF7254B8.toInt())
             val later = app.repository.saveActivity(null, "Later", 0xFFB6553C.toInt())
             listOf(first, later).forEachIndexed { index, activity ->
                 val from = Boundary.capture(start.plusSeconds(index * 60L), zone)
@@ -86,14 +85,15 @@ class TrackerUiTest {
                     activeSlot = null, createdAtMs = from.atMs, updatedAtMs = from.atMs
                 ))
             }
-            missed
         }
 
         ui.onNodeWithText("Calendar").performClick()
         ui.onNodeWithContentDescription("Previous day").performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("Tap an entry to edit its start and end.").fetchSemanticsNodes().isNotEmpty() }
         val firstRow = hasText("First") and hasClickAction()
+        val combine = hasText("Combine") and hasClickAction()
         ui.onNode(hasScrollAction()).performScrollToNode(firstRow)
+        ui.onNode(combine).assertDoesNotExist()
         ui.onNode(firstRow).performClick()
         ui.onNodeWithText("End date and time").performScrollTo()
             .performTextReplacement(TimeRules.originalLocal(Boundary.capture(gapStart, zone)))
@@ -105,20 +105,34 @@ class TrackerUiTest {
 
         val gapRow = hasText("Untracked time") and hasClickAction()
         ui.onNode(hasScrollAction()).performScrollToNode(gapRow)
+        ui.onNode(combine).assertDoesNotExist()
         ui.onNode(gapRow and hasText("500 ms", substring = true)).assertIsDisplayed().performClick()
         ui.waitUntil(10_000) { ui.onAllNodesWithText("Fill untracked time").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("Choose activity").performClick()
-        ui.onNodeWithText("Missed activity").performClick()
+        ui.onNode(hasText("First") and hasAnyAncestor(isPopup())).performClick()
         ui.onNodeWithText("Add entry").performClick()
-        ui.waitUntil(10_000) { ui.onAllNodesWithText("Add entry").fetchSemanticsNodes().isEmpty() }
-
-        val addedRow = hasText("Missed activity") and hasClickAction()
-        ui.onNode(hasScrollAction()).performScrollToNode(addedRow)
-        ui.onNode(addedRow).assertIsDisplayed()
+        val addedConfirmation = ui.onAllNodesWithText("Calendar entry added")
+        ui.waitUntil(10_000) { addedConfirmation.fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntil(10_000) { addedConfirmation.fetchSemanticsNodes().isEmpty() }
         ui.onNode(gapRow).assertDoesNotExist()
-        val saved = runBlocking { app.database.dao().intervals() }.single { it.activityId == missed }
+        val saved = runBlocking { app.database.dao().intervals() }.single { it.id !in listOf("gap-0", "gap-1") }
         assertEquals(gapStart.toEpochMilli(), saved.startAtMs)
         assertEquals(gapEnd.toEpochMilli(), saved.endAtMs)
+
+        val firstCombine = combine and hasAnyAncestor(hasText("09:00 – 09:00", substring = true))
+        val addedCombine = combine and hasAnyAncestor(hasText("09:00 – 09:01", substring = true))
+        ui.onNode(hasScrollAction()).performScrollToNode(firstCombine)
+        ui.onNode(firstCombine).assertIsDisplayed()
+        ui.onNode(hasScrollAction()).performScrollToNode(addedCombine)
+        ui.onNode(addedCombine).assertIsDisplayed().performClick()
+        ui.waitUntil(10_000) {
+            ui.onAllNodesWithText("Calendar entries combined").fetchSemanticsNodes().isNotEmpty()
+        }
+        ui.onNode(combine).assertDoesNotExist()
+        val combined = runBlocking { app.database.dao().intervals() }
+        assertEquals(listOf("gap-0", "gap-1"), combined.map { it.id })
+        assertEquals(start.toEpochMilli(), combined[0].startAtMs)
+        assertEquals(gapEnd.toEpochMilli(), combined[0].endAtMs)
     }
 
     @Test fun calendarCanDeleteRepeatedMistakesAndCreditThePreviousActivity() {
